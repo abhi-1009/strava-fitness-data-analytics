@@ -45,7 +45,7 @@ This project analyzes public **Fitbit fitness tracker data** (Fitabase/Mobius, 3
 
 ```
 STRAVA_FITNESS/
-├── CSV_DATA/                          # 18 raw Fitabase source CSVs
+├── CSV_DATA/                          # 08 raw Fitabase source CSVs
 ├── plots/                             # EDA charts (PNG) from Step 1
 ├── 01_eda_bellabeat.py                # Step 1: load, merge, clean, EDA
 ├── 02_mysql_schema_and_load.sql       # Step 2: MySQL schema + LOAD DATA INFILE
@@ -115,7 +115,7 @@ Then open **http://localhost:8501** in your browser.
 
 ## 🌐 Live Demo
 
-🔗 *(add your deployed Streamlit Cloud / Aiven-backed link here)*
+🔗 *https://strava-fitness-data-analytics-kcub5qlwvka7vop66qlayq.streamlit.app/*
 
 ---
 
