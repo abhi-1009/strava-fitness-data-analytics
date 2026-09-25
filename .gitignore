@@ -1,0 +1,23 @@
+# --- Secrets (never commit real credentials) ---
+streamlit_app/.streamlit/secrets.toml
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+*.egg-info/
+
+# --- VS Code ---
+.vscode/
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+
+streamlit_app/ca.pem
