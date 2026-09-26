@@ -1,3 +1,5 @@
+import os
+import tempfile
 from contextlib import contextmanager
 from typing import Optional
 from urllib.parse import quote_plus
@@ -10,8 +12,16 @@ from sqlalchemy.engine import Engine
 def get_engine() -> Engine:
     cfg = st.secrets['mysql']
     connect_args = {}
-    if cfg.get('ssl_ca'):
-        connect_args['ssl'] = {'ca': cfg['ssl_ca']}
+    ssl_ca = cfg.get('ssl_ca', '')
+    if ssl_ca:
+        if os.path.exists(ssl_ca):
+            ca_path = ssl_ca
+        else:
+            tmp = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.pem')
+            tmp.write(ssl_ca)
+            tmp.close()
+            ca_path = tmp.name
+        connect_args['ssl'] = {'ca': ca_path}
     url = f'mysql+pymysql://{quote_plus(cfg['user'])}:{quote_plus(cfg['password'])}@{cfg['host']}:{cfg.get('port', 3306)}/{cfg['database']}'
     return create_engine(url, connect_args=connect_args, pool_pre_ping=True, pool_recycle=280)
 
