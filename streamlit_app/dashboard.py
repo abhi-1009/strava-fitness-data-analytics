@@ -1,3 +1,4 @@
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -12,22 +13,43 @@ def dark(fig, height=380, **kw):
 
 def card(icon, title, text):
     st.markdown(f"<div style='background:#1C2128;border:1px solid #30363D;border-left:4px solid #FC4C02;border-radius:10px;padding:14px 16px;margin-bottom:10px;'><b>{icon} {title}</b><p style='color:#C9D1D9;margin:6px 0 0;font-size:0.9em;'>{text}</p></div>", unsafe_allow_html=True)
+
+def auto_chart(df):
+    if df.empty or len(df) < 2:
+        return None
+    num_cols = df.select_dtypes('number').columns.tolist()
+    other_cols = [c for c in df.columns if c not in num_cols]
+    if not num_cols:
+        return None
+    y = num_cols[0]
+    if other_cols and df[other_cols[0]].nunique() <= 40:
+        fig = px.bar(df, x=other_cols[0], y=y, color_discrete_sequence=['#FC4C02'])
+    elif len(num_cols) >= 2:
+        fig = px.scatter(df, x=num_cols[0], y=num_cols[1], color_discrete_sequence=['#FC4C02'])
+    else:
+        fig = px.bar(df, y=y, color_discrete_sequence=['#FC4C02'])
+    return dark(fig, 350)
+
+def auto_insight(df):
+    num_cols = [c for c in df.select_dtypes('number').columns if c.lower() != 'id']
+    if not num_cols:
+        return None
+    col = num_cols[0]
+    row = df.loc[df[col].idxmax()]
+    label_col = next((c for c in df.columns if c not in num_cols), df.columns[0])
+    return f'Highest **{col}**: {row[label_col]} ({row[col]:,.2f})'
 st.sidebar.markdown('## 🏃 Bellabeat Analytics')
 st.sidebar.caption('Live MySQL-backed dashboard · Fitbit fitness tracker data')
 with st.spinner('Connecting to MySQL...'):
-    all_users = db.get_user_ids()
-    min_date, max_date = db.get_date_range()
+    all_users = db.get_user_ids(); min_date, max_date = db.get_date_range()
 if not all_users or min_date is None:
-    st.error('Could not load data from MySQL. Check `.streamlit/secrets.toml` and that `daily_activity` / `hourly_activity` are populated (run `00_load_to_mysql.py`).')
-    st.stop()
+    st.error('Could not load data from MySQL. Check `.streamlit/secrets.toml` and that `daily_activity` / `hourly_activity` are populated (run `00_load_to_mysql.py`).'); st.stop()
 st.sidebar.markdown('### Filters')
 selected_users = st.sidebar.multiselect('Users (by Fitbit Id)', options=all_users, default=all_users, help='Defaults to all users.')
 date_range = st.sidebar.date_input('Date range', value=(min_date, max_date), min_value=min_date, max_value=max_date)
 if not selected_users:
-    st.sidebar.warning('Select at least one user.')
-    st.stop()
-if len(date_range) != 2:
-    st.stop()
+    st.sidebar.warning('Select at least one user.'); st.stop()
+if len(date_range) != 2: st.stop()
 start_date, end_date = date_range
 user_tuple = tuple(selected_users)
 with st.sidebar.expander('ℹ️ Data assumptions & limitations'):
@@ -77,16 +99,33 @@ with tab_overview:
         st.markdown('#### Daily steps over time')
         trend = daily.sort_values('ActivityDate').groupby('ActivityDate', as_index=False)['TotalSteps'].mean()
         st.plotly_chart(dark(px.line(trend, x='ActivityDate', y='TotalSteps', color_discrete_sequence=['#FC4C02'])), width='stretch')
+        st.caption(f"Highest average: **{str(trend.loc[trend['TotalSteps'].idxmax(), 'ActivityDate'])[:10]}** at {trend['TotalSteps'].max():,.0f} steps")
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown('#### Steps vs. Calories')
             fig2 = px.scatter(daily, x='TotalSteps', y='Calories', color='Weekday', category_orders={'Weekday': WEEKDAY_ORDER}, opacity=0.7)
             st.plotly_chart(dark(fig2, 350), width='stretch')
+            st.caption(f"Strongly correlated (r = {daily['TotalSteps'].corr(daily['Calories']):.2f}) - more steps, more calories burnt")
         with col_b:
             st.markdown('#### Active minutes breakdown')
             minutes_avg = daily[['VeryActiveMinutes', 'FairlyActiveMinutes', 'LightlyActiveMinutes', 'SedentaryMinutes']].mean()
             fig3 = px.pie(names=minutes_avg.index, values=minutes_avg.values, hole=0.5, color_discrete_sequence=px.colors.sequential.Oranges_r)
             st.plotly_chart(dark(fig3, 350), width='stretch')
+            st.caption(f"**{minutes_avg.idxmax()}** dominates the day, averaging {minutes_avg.max():.0f} min")
+        col_c, col_d = st.columns(2)
+        with col_c:
+            st.markdown('#### Correlation Heatmap')
+            num_cols = [c for c in ['TotalSteps', 'TotalDistance', 'VeryActiveMinutes', 'FairlyActiveMinutes', 'LightlyActiveMinutes', 'SedentaryMinutes', 'Calories', 'TotalMinutesAsleep'] if c in daily.columns]
+            corr = daily[num_cols].corr().round(2)
+            fig4 = px.imshow(corr, text_auto=True, color_continuous_scale='RdBu_r', zmin=-1, zmax=1)
+            st.plotly_chart(dark(fig4, 380), width='stretch')
+            pair = corr.abs().where(~np.eye(len(corr), dtype=bool)).stack().idxmax(); st.caption(f'Strongest link: **{pair[0]}** vs **{pair[1]}** (r = {corr.loc[pair]:.2f})')
+        with col_d:
+            st.markdown('#### Sedentary Minutes Distribution')
+            fig5 = px.histogram(daily, x='SedentaryMinutes', nbins=30, color_discrete_sequence=['#FC4C02'])
+            st.plotly_chart(dark(fig5, 380), width='stretch')
+            not_worn_pct = (daily['SedentaryMinutes'] >= 1440).mean() * 100
+            st.caption(f'Median: {daily['SedentaryMinutes'].median():,.0f} min/day · {not_worn_pct:.0f}% of days show a full 24h sedentary (likely not worn)')
 with tab_weekday:
     wk = db.get_weekday_summary(user_tuple, start_date, end_date)
     if wk.empty:
@@ -96,6 +135,7 @@ with tab_weekday:
         metric_choice = st.radio('Metric', ['avg_steps', 'avg_calories', 'avg_sedentary_minutes'], horizontal=True, label_visibility='collapsed')
         fig = px.bar(wk, x='Weekday', y=metric_choice, category_orders={'Weekday': WEEKDAY_ORDER}, color=metric_choice, color_continuous_scale='Oranges')
         st.plotly_chart(dark(fig, 420), width='stretch')
+        peak = wk.loc[wk[metric_choice].idxmax()]; st.caption(f'Peak: **{peak['Weekday']}** at {peak[metric_choice]:,.0f}')
         st.dataframe(wk, width='stretch', hide_index=True)
 with tab_segments:
     seg = db.get_activity_segments()
@@ -108,10 +148,10 @@ with tab_segments:
         with col1:
             fig = px.pie(seg, names='activity_segment', values='num_users', hole=0.4, color_discrete_sequence=['#FC4C02', '#FF8552', '#FFB088', '#4C566A'])
             st.plotly_chart(dark(fig), width='stretch')
+            st.caption(f"Largest segment: **{seg.loc[seg['num_users'].idxmax(), 'activity_segment']}** ({int(seg['num_users'].max())} users)")
         with col2:
             st.dataframe(seg.sort_values('num_users', ascending=False), width='stretch', hide_index=True)
-            below = seg.loc[seg['activity_segment'].isin(['Sedentary', 'Lightly Active']), 'num_users'].sum()
-            total = seg['num_users'].sum()
+            below = seg.loc[seg['activity_segment'].isin(['Sedentary', 'Lightly Active']), 'num_users'].sum(); total = seg['num_users'].sum()
             st.metric('Users below 7,500 steps/day', f'{below}/{total} ({below / total * 100:.0f}%)')
 with tab_hourly:
     hourly = db.get_hourly_pattern(user_tuple, start_date, end_date)
@@ -122,10 +162,13 @@ with tab_hourly:
         fig = go.Figure()
         fig.add_bar(x=hourly['Hour'], y=hourly['avg_calories'], name='Avg Calories', marker_color='#FC4C02')
         st.plotly_chart(dark(fig, 400, xaxis_title='Hour of Day', yaxis_title='Avg Calories'), width='stretch')
+        peak_hr = hourly.loc[hourly['avg_calories'].idxmax(), 'Hour']; st.caption(f'Peaks at **{int(peak_hr)}:00** ({hourly['avg_calories'].max():.0f} avg calories)')
         if hourly['avg_heart_rate'].notna().any():
             st.markdown('#### Average heart rate by hour of day')
-            fig2 = px.line(hourly.dropna(subset=['avg_heart_rate']), x='Hour', y='avg_heart_rate', color_discrete_sequence=['#FF8552'])
+            hr_df = hourly.dropna(subset=['avg_heart_rate'])
+            fig2 = px.line(hr_df, x='Hour', y='avg_heart_rate', color_discrete_sequence=['#FF8552'])
             st.plotly_chart(dark(fig2, 350), width='stretch')
+            st.caption(f"Peaks around **{int(hr_df.loc[hr_df['avg_heart_rate'].idxmax(), 'Hour'])}:00** ({hr_df['avg_heart_rate'].max():.0f} bpm)")
         else:
             st.caption('No heart-rate data for the selected users/date range.')
 with tab_sleep:
@@ -136,8 +179,7 @@ with tab_sleep:
         st.markdown('#### Sedentary minutes vs. minutes asleep')
         fig = px.scatter(sleep_df, x='SedentaryMinutes', y='TotalMinutesAsleep', trendline='ols', opacity=0.6, color_discrete_sequence=['#FC4C02'])
         st.plotly_chart(dark(fig, 420), width='stretch')
-        corr = sleep_df[['SedentaryMinutes', 'TotalMinutesAsleep']].corr().iloc[0, 1]
-        st.metric('Correlation (sedentary min. vs. sleep min.)', f'{corr:.2f}')
+        corr = sleep_df[['SedentaryMinutes', 'TotalMinutesAsleep']].corr().iloc[0, 1]; st.metric('Correlation (sedentary min. vs. sleep min.)', f'{corr:.2f}')
         st.caption(f'Based on {sleep_df['Id'].nunique()} users who logged sleep, {len(sleep_df)} day-records.')
 with tab_weight:
     weight_df = db.get_weight_log(user_tuple)
@@ -147,6 +189,7 @@ with tab_weight:
         st.markdown(f'#### Weight/BMI log ({weight_df['Id'].nunique()} users)')
         fig = px.scatter(weight_df, x='ActivityDate', y='WeightKg', color=weight_df['Id'].astype(str), symbol='IsManualReport')
         st.plotly_chart(dark(fig, 420, legend_title='User Id'), width='stretch')
+        st.caption(f"Average BMI: {weight_df['BMI'].mean():.1f} across {weight_df['Id'].nunique()} users ({len(weight_df)} logs)")
         st.dataframe(weight_df, width='stretch', hide_index=True)
 QUERY_PRESETS = {'Top 10 most active days': 'SELECT Id, ActivityDate, Weekday, TotalSteps, Calories FROM daily_activity ORDER BY TotalSteps DESC LIMIT 10;', 'Weekday summary': 'SELECT Weekday, ROUND(AVG(TotalSteps),0) avg_steps, ROUND(AVG(Calories),0) avg_calories FROM daily_activity GROUP BY Weekday;', 'User activity segments': 'SELECT Id, ROUND(AVG(TotalSteps),0) avg_steps, COUNT(*) days_logged FROM daily_activity GROUP BY Id ORDER BY avg_steps DESC;', 'Sleep vs. sedentary (users who logged sleep)': 'SELECT Id, ROUND(AVG(TotalMinutesAsleep),0) avg_sleep, ROUND(AVG(SedentaryMinutes),0) avg_sedentary FROM daily_activity WHERE TotalMinutesAsleep IS NOT NULL GROUP BY Id;', 'Hourly calories & heart rate': 'SELECT Hour, ROUND(AVG(Calories),1) avg_calories, ROUND(AVG(AvgHeartRate),1) avg_hr FROM hourly_activity GROUP BY Hour ORDER BY Hour;', 'Weight/BMI log': 'SELECT Id, ActivityDate, WeightKg, BMI FROM daily_activity WHERE WeightKg IS NOT NULL;', 'Custom (write your own)': 'SELECT * FROM daily_activity LIMIT 10;'}
 with tab_sql:
@@ -163,14 +206,19 @@ with tab_sql:
             if not result.empty:
                 st.dataframe(result, width='stretch', hide_index=True)
                 st.caption(f'{len(result)} rows returned.')
+                fig = auto_chart(result)
+                if fig:
+                    st.plotly_chart(fig, width='stretch')
+                insight = auto_insight(result)
+                if insight:
+                    st.caption(insight)
 with tab_conclusion:
     seg_df = db.get_activity_segments()
     sleep_corr_df = db.get_sleep_vs_sedentary(user_tuple, start_date, end_date)
     daily_all = db.get_daily_filtered(user_tuple, start_date, end_date)
     below_pct = corr_val = worn_pct = None
     if not seg_df.empty:
-        below = seg_df.loc[seg_df['activity_segment'].isin(['Sedentary', 'Lightly Active']), 'num_users'].sum()
-        below_pct = below / seg_df['num_users'].sum() * 100
+        below = seg_df.loc[seg_df['activity_segment'].isin(['Sedentary', 'Lightly Active']), 'num_users'].sum(); below_pct = below / seg_df['num_users'].sum() * 100
     if not sleep_corr_df.empty:
         corr_val = sleep_corr_df[['SedentaryMinutes', 'TotalMinutesAsleep']].corr().iloc[0, 1]
     if not daily_all.empty:
